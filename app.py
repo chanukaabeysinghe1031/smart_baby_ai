@@ -21,6 +21,10 @@ if not api_key:
 openai.api_key = api_key
 
 
+@app.route("/", methods=["GET"])
+def init():
+    return jsonify({"message": "SUCCESS"})
+    
 @app.route("/ask", methods=["POST"])
 def ask_question():
     data = request.json
