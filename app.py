@@ -9,71 +9,91 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Load environment variables
-api_key = os.getenv('OPENAI_API_KEY')
+# =========================================
 
-# Ensure API key is set
+api_key = os.getenv('OPENAI_API_KEY')
 if not api_key:
     raise ValueError("Please set the OPENAI_API_KEY environment variable")
 
-# Initialize OpenAI client
-openai.api_key = api_key
+# Initialize the OpenAI client
+client = OpenAI(api_key=api_key)
+
+# Define assistant ID
+
+ASSISTANT_ID = "asst_gG5MOjxPk6juhI7FoHCTFxy7"
 
 
 # Thread management functions
 def check_if_thread_exists(user_id):
     with shelve.open("threads_db") as threads_shelf:
-        return threads_shelf.get(user_id, [])
+        return threads_shelf.get(user_id, None)
 
 
-def store_thread(user_id, messages):
+def store_thread(user_id, thread_id):
     with shelve.open("threads_db", writeback=True) as threads_shelf:
-        threads_shelf[user_id] = messages
+        threads_shelf[user_id] = thread_id
 
 
-def format_message_body(user_data, question):
-    """
-    Format the message body by combining user data with the question.
-    """
-    details = (
-        f"Weight: {user_data.get('weight')}, "
-        f"Height: {user_data.get('height')}, "
-        f"Longitude: {user_data.get('longitude')}, "
-        f"Latitude: {user_data.get('latitude')}, "
-        f"Child Name: {user_data.get('childName')}, "
-        f"Parent First Name: {user_data.get('parentFirstName')}, "
-        f"Current Age: {user_data.get('currentAge')}, "
-        f"Sex: {user_data.get('sex')}\n\n"
-    )
-    return details + "Question: " + question
-
-
+# Function to generate a response
 def generate_response(message_body, user_id):
-    # Retrieve or initialize message history
-    messages = check_if_thread_exists(user_id)
+    # Check if there is already a thread_id for the user_id
+    thread_id = check_if_thread_exists(user_id)
 
-    # Ensure messages is a list
-    if not isinstance(messages, list):
-        messages = []
+    # If a thread doesn't exist, create one and store it
+    if thread_id is None:
+        print(f"Creating new thread for user_id {user_id}")
+        thread = client.beta.threads.create()
+        store_thread(user_id, thread.id)
+        thread_id = thread.id
+    else:
+        print(f"Retrieving existing thread for user_id {user_id}")
+        thread = client.beta.threads.retrieve(thread_id)
 
-    # Add user message to the history
-    messages.append({"role": "user", "content": message_body})
+    # Add message to thread
+    message = client.beta.threads.messages.create(
+        thread_id=thread_id,
+        role="user",
+        content=message_body,
+    )
+    print(f"📤 Message Sent: {message.id}")
 
-    # Request OpenAI for a response
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo", messages=messages, max_tokens=150
+    # Run the assistant and get the new message
+    new_message = run_assistant(thread)
+    print(f"To user_id {user_id}: {new_message}")
+    return new_message
+
+
+# Function to run the assistant
+def run_assistant(thread):
+    # Run the assistant
+    run = client.beta.threads.runs.create(
+        thread_id=thread.id,
+        assistant_id=ASSISTANT_ID,
     )
 
-    # Get the assistant's reply
-    answer = response.choices[0].message["content"].strip()
+    # Wait for completion
+    while run.status != "completed":
+        time.sleep(0.5)
+        run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
 
-    # Add assistant's message to the history
-    messages.append({"role": "assistant", "content": answer})
+    # Retrieve the Messages
+    message_response = client.beta.threads.messages.list(thread_id=thread.id)
+    messages = message_response.data
 
-    # Store the updated message history
-    store_thread(user_id, messages)
+    # Extract the assistant's reply from the messages
+    assistant_reply = None
+    for msg in messages:
+        if msg.role == "assistant":
+            assistant_reply = msg.content[0].text.value
+            break
 
-    return answer
+    if assistant_reply:
+        print(f"Generated message: {assistant_reply}")
+    else:
+        assistant_reply = "No response from the assistant."
+        print("No response from the assistant.")
+
+    return assistant_reply
 
 
 @app.route("/ask", methods=["POST"])
@@ -83,31 +103,25 @@ def ask_question():
     question = data.get("question")
 
     # Extract additional user data
-    user_data = {
-        "weight": data.get("weight"),
-        "height": data.get("height"),
-        "longitude": data.get("longitude"),
-        "latitude": data.get("latitude"),
-        "childName": data.get("childName"),
-        "parentFirstName": data.get("parentFirstName"),
-        "currentAge": data.get("currentAge"),
-        "sex": data.get("sex"),
-    }
 
-    # Ensure that userId and question are provided
-    if not user_id or not question:
-        return jsonify({"message": "userId and question are required"}), 400
+    if( data.get("weight")) : 
+        user_data = {
+            "question":question
+        }
+    else:
+        user_data = {
+            "weight": data.get("weight"),
+            "height": data.get("height"),
+            "longitude": data.get("longitude"),
+            "latitude": data.get("latitude"),
+            "childName": data.get("childName"),
+            "parentFirstName": data.get("parentFirstName"),
+            "currentAge": data.get("currentAge"),
+            "sex": data.get("sex"),
+            "question":question
+        }
 
-    # Combine the user data with the question to create a formatted message
-    message_body = format_message_body(user_data, question)
-
-    try:
-        # Generate a response and manage the thread
-        answer = generate_response(message_body, user_id)
-        return jsonify({"response": answer})
-
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    generate_response(user_data, user_id)
 
 
 if __name__ == "__main__":
