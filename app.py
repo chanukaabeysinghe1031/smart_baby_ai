@@ -2,7 +2,9 @@ from flask import Flask, request, jsonify
 import os
 import shelve
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
+import json
+import time
 
 # Load environment variables from .env file
 load_dotenv()
@@ -11,7 +13,8 @@ app = Flask(__name__)
 
 # =========================================
 
-api_key = os.getenv('OPENAI_API_KEY')
+api_key = os.getenv("OPENAI_API_KEY")
+
 if not api_key:
     raise ValueError("Please set the OPENAI_API_KEY environment variable")
 
@@ -34,7 +37,6 @@ def store_thread(user_id, thread_id):
         threads_shelf[user_id] = thread_id
 
 
-# Function to generate a response
 def generate_response(message_body, user_id):
     # Check if there is already a thread_id for the user_id
     thread_id = check_if_thread_exists(user_id)
@@ -49,7 +51,11 @@ def generate_response(message_body, user_id):
         print(f"Retrieving existing thread for user_id {user_id}")
         thread = client.beta.threads.retrieve(thread_id)
 
-    # Add message to thread
+    # Retrieve the chat history
+    chat_history = get_chat_history(thread_id)
+    print(f"Chat history for user_id {user_id}: {chat_history}")
+
+    # Add new message to thread
     message = client.beta.threads.messages.create(
         thread_id=thread_id,
         role="user",
@@ -60,7 +66,25 @@ def generate_response(message_body, user_id):
     # Run the assistant and get the new message
     new_message = run_assistant(thread)
     print(f"To user_id {user_id}: {new_message}")
-    return new_message
+    return new_message, chat_history
+
+
+def get_chat_history(thread_id):
+    # Retrieve all messages in the thread
+    message_response = client.beta.threads.messages.list(thread_id=thread_id)
+    messages = message_response.data
+
+    # Extract and format the chat history
+    chat_history = []
+    for msg in messages:
+        if hasattr(msg.content[0], "text"):
+            chat_history.append(
+                {"role": msg.role, "content": msg.content[0].text.value}
+            )
+        else:
+            chat_history.append({"role": msg.role, "content": "No text content found."})
+
+    return chat_history
 
 
 # Function to run the assistant
@@ -104,24 +128,39 @@ def ask_question():
 
     # Extract additional user data
 
-    if( data.get("weight")) : 
-        user_data = {
-            "question":question
-        }
-    else:
-        user_data = {
-            "weight": data.get("weight"),
-            "height": data.get("height"),
-            "longitude": data.get("longitude"),
-            "latitude": data.get("latitude"),
-            "childName": data.get("childName"),
-            "parentFirstName": data.get("parentFirstName"),
-            "currentAge": data.get("currentAge"),
-            "sex": data.get("sex"),
-            "question":question
-        }
+    print(data)
+    if data.get("weight"):
+        print("===============================\n")
+        print(data.get("weight"))
+        print(data.get("height"))
+        print(data.get("longitude"))
+        print(data.get("latitude"))
+        print(data.get("childName"))
+        print(data.get("parentFirstName"))
+        print(data.get("currentAge"))
+        print("===============================\n")
 
-    generate_response(user_data, user_id)
+        user_data = json.dumps(
+            {
+                "weight": data.get("weight"),
+                "height": data.get("height"),
+                "longitude": data.get("longitude"),
+                "latitude": data.get("latitude"),
+                "childName": data.get("childName"),
+                "parentFirstName": data.get("parentFirstName"),
+                "currentAge": data.get("age"),
+                "sex": data.get("sex"),
+                "question": question,
+            }
+        )
+    else:
+        user_data = json.dumps({"question": question})
+
+    assistant_reply, chat_history = generate_response(user_data, user_id)
+    print({"chat_history": chat_history})
+
+    return jsonify({"reply": assistant_reply, "chat_history": chat_history})
+    # return jsonify({"reply": assistant_reply})
 
 
 if __name__ == "__main__":
