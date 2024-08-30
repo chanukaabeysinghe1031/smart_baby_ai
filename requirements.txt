@@ -24,7 +24,7 @@ Jinja2==3.1.4
 MarkupSafe==2.1.5
 multidict==6.0.5
 numpy==2.0.1
-openai==0.28.0
+openai
 openpyxl==3.1.5
 pandas==2.2.2
 pandas-stubs==2.2.2.240603
