@@ -23,7 +23,7 @@ client = OpenAI(api_key=api_key)
 
 # Define assistant ID
 
-ASSISTANT_ID = "asst_gG5MOjxPk6juhI7FoHCTFxy7"
+ASSISTANT_ID = "asst_vEzouyeLElAGtcRWtj48cXaT"
 
 
 # Thread management functions
